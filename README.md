@@ -279,8 +279,8 @@ The Fusion 360 API is **not thread-safe** and requires all operations to run on 
 
 
 # Note #
-I did not know about script generation MCP workflows, because I am pretty new to this Software world    
-If you want to build it yourself i suggest you look into that concept
+This Fusion MCP implementation uses hard coded Tools, instead of trusting on   
+the training of the LLM's. I chose this, because I wanted to test how far I can come  
 
 
 
