@@ -1,288 +1,207 @@
-# Fusion MCP Integration
+# Fusion 360 MCP
 
+A [Model Context Protocol](https://modelcontextprotocol.io) integration that lets AI assistants (Claude, GitHub Copilot) control Autodesk Fusion 360 via HTTP.
 
-https://github.com/user-attachments/assets/46c8140e-377d-4618-a304-03861cb3d7d9
+```
+AI Client (Claude / Copilot)
+        |  MCP protocol (stdio or SSE)
+        v
+  MCP_Server.py  (FastMCP)
+        |  HTTP POST + X-API-Key header
+        v
+  MCP/MCP.py  (Fusion 360 Add-In HTTP server on 127.0.0.1:5000)
+        |  Fusion 360 CustomEvent (thread-safe)
+        v
+  Fusion 360 API  (adsk.core / adsk.fusion)
+```
 
+## Repository Structure
 
-## 🎯 About
-
-Fusion MCP Integration bridges AI assistants with Autodesk Fusion 360 through the Model Context Protocol (MCP). This enables:
-
-- ✨ **Conversational CAD** - Create 3D models using natural language
-- 🤖 **AI-Driven Automation** - Automate repetitive modeling tasks
-- 🔧 **Parametric Control** - Dynamically modify design parameters
-- 🎓 **Accessible CAD** - Lower the barrier for non-CAD users
-
-> **Note:** This is designed as an assistive tool and educational project, not a replacement for professional CAD workflows.
-> Projects like this can assist people with no experience in CAD workflows.
-
-> **Goal:** Enable conversational CAD and AI-driven automation in Fusion.
+```
+.
+├── MCP/
+│   └── MCP.py          # Fusion 360 Add-In — runs an HTTP server on localhost:5000
+├── Server/
+│   ├── MCP_Server.py   # FastMCP server — exposes tools to AI assistants
+│   ├── requirements.txt
+│   └── tests/
+├── Install_Addin.py    # Automated add-in installer
+└── .env.example
+```
 
 ---
 
+## Prerequisites
 
-# Setup
-
-**I highly recommend to do everything inside Visual Studio Code or an other IDE**
-
----
-
-## Requirements
-| Requirement | Link |
-|------------|------|
-| Python 3.10+ | https://python.org |
-| Autodesk Fusion 360 | https://autodesk.com/fusion360 |
-| Claude Desktop | https://claude.ai/download |
-| VS Code | https://code.visualstudio.com |
+- **Autodesk Fusion 360** (latest)
+- **Python 3.11+**
+- An AI client that supports MCP: [Claude Desktop](https://claude.ai/download) or VS Code with GitHub Copilot
 
 ---
 
-## Clone Repository
-```bash
-git clone https://github.com/JustusBraitinger/FusionMCP
-```
+## Installation
 
+### 1. Install the Fusion 360 Add-In
 
-> **Important:** Do **NOT** start the Add-In yet.
-
-
-
-## Install Python Dependencies
-```bash
-cd Server
-python -m venv venv
-```
-
-### Activate venv
-
-**Windows PowerShell**
-```powershell
-.\venv\Scripts\Activate
-```
-
-### Install packages
-```bash
-pip install -r requirements.txt
-pip install "mcp[cli]"
-```
-## Installing the MCP Add-In for Fusion 360
+**Automated (recommended):**
 
 ```bash
-cd ..
 python Install_Addin.py
 ```
+
+**Manual:**
+
+Copy the `MCP/` folder to the Fusion 360 add-ins directory:
+
+| Platform | Path |
+|----------|------|
+| Windows  | `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\` |
+| macOS    | `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/` |
+
+Then in Fusion 360: **Tools → Add-Ins → Scripts and Add-Ins → find MCP → Run**
+
 ---
 
-## Connect to Claude
-The most simple way to add the MCP-Server to Claude Desktop is to run following command:  
+### 2. Set Up the MCP Server
+
 ```bash
 cd Server
-uv run mcp install MCP_Server.py
+pip install -r requirements.txt
+cp ../.env.example .env
 ```
-The output should be like this:    
+
+Edit `.env` and set `FUSION_API_KEY` to a strong random secret. To generate one:
 
 ```bash
-[11/13/25 08:42:37] INFO     Added server 'Fusion' to Claude config
-                    INFO     Successfully installed Fusion in Claude app                                                                                                                                                               
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-# Alternative
+---
 
-### Modify Claude Config
-In Claude Desktop go to:  
-**Settings → Developer → Edit Config**
+### 3. Configure Your AI Client
 
-Add this block (change the path for your system):
+#### Claude Desktop
+
+Add the following to `claude_desktop_config.json`
+(on Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+
 ```json
 {
   "mcpServers": {
-    "FusionMCP": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "C:\\Path\\to\\FusionMCP\\Server",
-        "run",
-        "MCP_Server.py"
-      ]
+    "fusion360": {
+      "command": "python",
+      "args": ["path/to/Server/MCP_Server.py", "--server_type", "stdio"],
+      "env": {
+        "FUSION_API_KEY": "your-secret-key"
+      }
     }
   }
 }
 ```
-> **Note:** Windows paths require double backslashes `\\`
 
+Restart Claude Desktop after saving.
 
-### Using the MCP in Claude
-1. Restart Claude if needed (force close if not visible)
-2. Click **➕ Add** (bottom left of chat)
-3. Select **Add from Fusion**
-4. Choose a Fusion MCP prompt
+#### VS Code with GitHub Copilot
 
----
+Add the following to `.vscode/mcp.json` in your workspace:
 
-## Use MCP in VS Code (Copilot)
-
-Create or edit the file:
-```
-%APPDATA%\Code\User\globalStorage\github.copilot-chat\mcp.json
-```
-
-Paste:
 ```json
 {
   "servers": {
-    "FusionMCP": {
-      "url": "http://127.0.0.1:8000/sse",
-      "type": "http"
+    "fusion360": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["Server/MCP_Server.py", "--server_type", "stdio"],
+      "env": {
+        "FUSION_API_KEY": "your-secret-key"
+      }
     }
-  },
-  "inputs": []
+  }
 }
 ```
 
-### Alternative Setup in VS Code
-1. Press **CTRL + SHIFT + P** → search **MCP** → choose:
-2. **Add MCP**
-3. **HTTP**
-4. Enter:
-5. Name your MCP **`FusionMCP`**!!
-```
-http://127.0.0.1:8000/sse
-```
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FUSION_API_KEY` | *(required)* | Shared secret sent as `X-API-Key` header on every request |
+| `FUSION_HOST` | `127.0.0.1` | Add-in host address (loopback only) |
+| `FUSION_PORT` | `5000` | Add-in HTTP port |
+| `FUSION_REQUEST_TIMEOUT` | `35` | Request timeout in seconds |
 
 ---
 
-## Try It Out 😄
-Activate the Fusion Addin inside Fusion
-### Configured in VS-Code:
-Start the server:
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `health_check` | Check that the add-in is reachable |
+| `test_connection` | Verify authentication and connectivity |
+| `delete_all` | Remove all bodies from the active design |
+| `undo` | Undo the last operation |
+| `count_parameters` | Return the number of user parameters |
+| `list_parameters` | List all user parameters and their values |
+| `change_parameter` | Change a user parameter value |
+| `list_bodies` | List all bodies in the active component |
+| `rename_body` | Rename a body |
+| `measure_bounding_box` | Return the bounding box dimensions of a body |
+| `draw_box` | Create a box (rectangular prism) |
+| `draw_cylinder` | Create a cylinder |
+| `draw_2d_circle` | Sketch a circle on a plane |
+| `draw_lines` | Sketch a polyline on a plane |
+| `draw_one_line` | Sketch a single line segment |
+| `draw_2d_rectangle` | Sketch a rectangle on a plane |
+| `draw_arc` | Sketch an arc on a plane |
+| `draw_spline` | Sketch a spline through a set of points |
+| `draw_ellipse` | Sketch an ellipse on a plane |
+| `draw_text` | Add sketch text on a plane |
+| `extrude` | Extrude a sketch profile |
+| `extrude_thin` | Extrude a sketch profile as a thin feature |
+| `cut_extrude` | Extrude a profile as a cut |
+| `revolve` | Revolve a profile around an axis |
+| `sweep` | Sweep a profile along a path |
+| `loft` | Loft between two or more profiles |
+| `shell_body` | Apply a shell operation to a body |
+| `fillet_edges` | Fillet selected edges |
+| `chamfer_edges` | Chamfer selected edges |
+| `boolean_operation` | Combine, cut, or intersect bodies |
+| `mirror_body` | Mirror a body across a plane |
+| `circular_pattern` | Create a circular pattern of a body |
+| `rectangular_pattern` | Create a rectangular pattern of a body |
+| `draw_holes` | Add holes to a body |
+| `move_latest_body` | Translate or rotate the most recently created body |
+| `export_step` | Export the design as a STEP file |
+| `export_stl` | Export a body as an STL file |
+| `create_thread` | Add a thread feature to a cylindrical face |
+| `draw_witzenmann_logo` | Draw the Witzenmann logo as a sketch |
+
+---
+
+## Units
+
+**1 unit = 1 cm (10 mm).** All dimension parameters must be provided in centimetres.
+
+---
+
+## Security
+
+- The add-in binds exclusively to `127.0.0.1` — it is never exposed on the network.
+- Every request must include a matching `X-API-Key` header; requests without a valid key are rejected with `401`.
+- Export filenames are sanitized to prevent path traversal attacks.
+
+---
+
+## Running Tests
+
 ```bash
-python MCP_Server.py
+cd Server
+pytest tests/ -v
 ```
-Then type   
-```
-/mcp.FusionMCP
-```
-Now you will see a list of predetermined Prompts.   
-### Configured in Claude   
-Just open Claude, an ask for the FusionMCP
 
 ---
 
-## 🛠️ Available Tools
+## License
 
----
-
-### ✏️ Sketching & Creation Tools
-
-| Tool | Description |
-| :--- | :--- |
-| **Draw 2D circle** | Draws a 2D **circle** at a specified position and plane. |
-| **Ellipsie** | Generates an **ellipse** (elliptical curve) in the sketching plane. |
-| **Draw lines** | Creates a **polyline** (multiple connected lines) as a sketch. |
-| **Draw one line** | Draws a single line between two 3D points. |
-| **3-Point Arc** | Draws a **circular arc** based on three defined points. |
-| **Spline** | Draws a **Spline curve** through a list of 3D points (used for sweep path). |
-| **Draw box** | Creates a **box** (solid body) with definable dimensions and position. |
-| **Draw cylinder** | Draws a **cylinder** (solid body). |
-| **Draw text**| Draws a text and extrudes it with given values |
-| **Draw Witzenmann logo** | A **fun demo function** for creating the Witzenmann logo. |
-
----
-
-### ⚙️ Feature & Modification Tools
-
-| Tool | Description |
-| :--- | :--- |
-| **Extrude** | **Extrudes** the last active sketch by a given value to create a body. |
-| **Revolve** | Creates a revolved body by **revolving** a profile around an axis. |
-| **Sweep** | Executes a sweep feature using the previously created profile and spline path. |
-| **Loft** | Creates a complex body by **lofting** between a defined number of previously created sketches. |
-| **Thin extrusion** | Creates a **thin-walled extrusion** (extrusion with constant wall thickness). |
-| **Cut extrude** | Removes material from a body by **cutting** a sketch (as a hole/pocket). |
-| **Draw holes** | Creates **Counterbore holes** at specified points on a surface (`faceindex`). |
-| **Fillet edges** | Rounds sharp edges with a defined **radius** (fillet). |
-| **Shell body** | **Hollows** out the body, leaving a uniform wall thickness. |
-| **Circular pattern** | Creates a **circular pattern** (array) of features or bodies around an axis. |
-| **Rectangular pattern**| Creates a **rectangular pattern** of a body|
-
-
----
-
-### 📏 Analysis & Control
-
-| Tool | Description |
-| :--- | :--- |
-| **Count** | Counts the total number of all **model parameters**. |
-| **List parameters** | Lists all defined **model parameters** in detail. |
-| **Change parameter** | Changes the value of an existing named parameter in the model. |
-| **Test connection** | Tests the communication link to the Fusion 360 server. |
-| **Undo** | **Undoes** the last operation in Fusion 360. |
-| **Delete all** | **Deletes all objects** in the current Fusion 360 session (`destroy`). |
-
----
-
-### 💾 Export
-
-| Tool | Description |
-| :--- | :--- |
-| **Export STEP** | **Exports** the model as a **STEP** file. |
-| **Export STL** | **Exports** the model as an **STL** file. |
-
-
-## Architecture
-
-### Server.py
-- Defines MCP server, tools, and prompts
-- Handles HTTP calls to Fusion add-in
-
-### MCP.py
-- Fusion Add-in
-- Because the Fusion API is not thread-safe, this uses:
-  - Custom event handler
-  - Task queue
-
----
-### Why This Architecture?
-
-The Fusion 360 API is **not thread-safe** and requires all operations to run on the main UI thread. Our solution:
-
-1. **Event-Driven Design** - Use Fusion's CustomEvent system
-2. **Task Queue** - Queue operations for sequential execution
-3. **Async Bridge** - HTTP server handles async MCP requests
-
-   
-## Security Considerations 🔒
-- Local execution → safe by default
-- Currently HTTP (OK locally, insecure on networks)
-- Validate tool inputs to avoid prompt injection
-- Real security depends on tool implementation
-
----
-
-### This is NOT
-
-- ❌ A production-ready tool
-- ❌ A replacement for professional CAD software
-- ❌ Suitable for critical engineering work
-- ❌ Officially supported by Autodesk
-
-### This IS
-
-- ✅ A proof-of-concept
-- ✅ An educational project
-- ✅ A demonstration of MCP capabilities
-- ✅ A tool for rapid prototyping and learning
-
----
-
-**This is a proof-of-concept, not production software.**
-
-
-# Note #
-This Fusion MCP implementation uses hard coded Tools, instead of trusting on   
-the training of the LLM's. I chose this, because I wanted to test how far I can come  
-
-
-
-## Contact
-justus@braitinger.org
+See [LICENSE](LICENSE).
