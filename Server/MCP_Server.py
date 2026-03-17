@@ -50,32 +50,43 @@ Answer only questions related to Fusion 360 CAD operations.
 # ---------------------------------------------------------------------------
 
 
-def send_request(endpoint: str, data: dict, timeout: float | None = None) -> dict:
+def send_request(endpoint: str, data: dict, headers: dict | None = None, timeout: float | None = None) -> dict:
     """Send a POST request to the Fusion 360 add-in with automatic retries."""
+    effective_headers = headers if headers is not None else config.HEADERS
     max_retries = 3
+    last_exc: Exception = RuntimeError("send_request: no attempts made")
     for attempt in range(max_retries):
         try:
             payload = json.dumps(data).encode()
             response = requests.post(
                 endpoint,
                 data=payload,
-                headers=config.HEADERS,
+                headers=effective_headers,
                 timeout=timeout or config.REQUEST_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
             logging.error("Request failed attempt %d/%d: %s", attempt + 1, max_retries, exc)
-            if attempt == max_retries - 1:
-                raise
-    return {}
+            last_exc = exc
+    raise last_exc
 
 
 def send_get(endpoint: str) -> dict:
-    """Send a GET request to the Fusion 360 add-in."""
-    response = requests.get(endpoint, headers=config.HEADERS, timeout=config.REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+    """Send a GET request to the Fusion 360 add-in with automatic retries."""
+    max_retries = 3
+    last_exc: Exception = RuntimeError("send_get: no attempts made")
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                endpoint, headers=config.HEADERS, timeout=config.REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:
+            logging.error("GET request failed attempt %d/%d: %s", attempt + 1, max_retries, exc)
+            last_exc = exc
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +243,7 @@ def draw_ellipse(
 ) -> dict:
     """Draw an ellipse defined by center point, major axis endpoint, and a through point."""
     return send_request(
-        config.ENDPOINTS["ellipsie"],
+        config.ENDPOINTS["ellipse"],
         {
             "x_center": x_center,
             "y_center": y_center,

@@ -211,11 +211,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _read_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length else b"{}"
+        cl = self.headers.get("Content-Length")
+        if cl is None:
+            return {}
+        length = int(cl)
+        if length == 0:
+            return {}
+        raw = self.rfile.read(length)
         return json.loads(raw) if raw else {}
 
     def do_GET(self):
+        if not self._auth():
+            self._json(401, {"success": False, "error": {"code": "UNAUTHORIZED"}})
+            return
         if self.path == "/health":
             rc = design.rootComponent if design else None
             self._json(200, {
@@ -223,9 +231,6 @@ class Handler(BaseHTTPRequestHandler):
                 "body_count": rc.bRepBodies.count if rc else 0,
                 "sketch_count": rc.sketches.count if rc else 0,
             })
-            return
-        if not self._auth():
-            self._json(401, {"success": False, "error": {"code": "UNAUTHORIZED"}})
             return
         if self.path == "/count_parameters":
             params = geo.get_model_parameters(design)
@@ -447,11 +452,18 @@ def stop(context):
         except Exception:
             pass
     handlers.clear()
+    # Drain the task queue so no new tasks start
     while not task_queue.empty():
         try:
             task_queue.get_nowait()
         except Exception:
             break
+    # Unblock any HTTP threads blocked in _queue_task waiting for a result
+    for task_id in list(result_store.keys()):
+        _resolve(task_id, {
+            "success": False,
+            "error": {"code": "SHUTDOWN", "message": "Add-in is shutting down"},
+        })
     if httpd:
         try:
             httpd.shutdown()

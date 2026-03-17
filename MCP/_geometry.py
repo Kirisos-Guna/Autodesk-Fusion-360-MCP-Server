@@ -3,7 +3,23 @@ import adsk.core
 import adsk.fusion
 import math
 import os
+import pathlib
 import re
+
+
+def _exports_dir(name: str) -> str:
+    """Return a platform-safe export directory path under ~/Desktop/Fusion_Exports/<name>.
+
+    Falls back to the home directory itself on systems where ~/Desktop does not exist.
+    """
+    home = pathlib.Path.home()
+    desktop = home / "Desktop"
+    if not desktop.exists():
+        desktop = home
+    safe = re.sub(r"[^A-Za-z0-9_\-]", "_", name)
+    out_dir = desktop / "Fusion_Exports" / safe
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return str(out_dir)
 
 
 def _pick_plane(design, plane: str):
@@ -79,6 +95,8 @@ def draw_circle(design, radius, x, y, z, plane="XY"):
 
 def draw_lines(design, points, plane="XY"):
     """Draw a closed polyline through the given points on the specified plane."""
+    if len(points) < 2:
+        raise ValueError("draw_lines requires at least 2 points.")
     rc = design.rootComponent
     sketch = rc.sketches.add(_pick_plane(design, plane))
     lines = sketch.sketchCurves.sketchLines
@@ -106,15 +124,21 @@ def draw_one_line(design, x1, y1, z1, x2, y2, z2, plane="XY"):
 
 
 def draw_2d_rect(design, x_1, y_1, z_1, x_2, y_2, z_2, plane="XY"):
-    """Draw a 2-D rectangle from corner (x_1,y_1,z_1) to (x_2,y_2,z_2)."""
+    """Draw a 2-D rectangle from corner (x_1,y_1,z_1) to (x_2,y_2,z_2).
+
+    The offset coordinate (perpendicular to the chosen plane) of the first
+    corner defines the sketch plane offset; both corners should share the same
+    offset value for a planar rectangle.
+    """
     rc = design.rootComponent
     base = _pick_plane(design, plane)
+    # Use first corner's perpendicular coordinate as the plane offset
     if plane == "XZ":
-        offset = y_1 if y_1 != 0 or y_2 != 0 else 0
+        offset = y_1  # y is perpendicular to XZ
     elif plane == "YZ":
-        offset = x_1 if x_1 != 0 or x_2 != 0 else 0
+        offset = x_1  # x is perpendicular to YZ
     else:
-        offset = z_1 if z_1 != 0 or z_2 != 0 else 0
+        offset = z_1  # z is perpendicular to XY
     sketch_plane = _offset_plane(design, base, offset) if offset != 0 else base
     sketch = rc.sketches.add(sketch_plane)
     sketch.sketchCurves.sketchLines.addTwoPointRectangle(
@@ -390,6 +414,8 @@ def boolean_operation(design, op):
         "intersect": adsk.fusion.FeatureOperations.IntersectFeatureOperation,
         "join": adsk.fusion.FeatureOperations.JoinFeatureOperation,
     }
+    if op not in ops:
+        raise ValueError(f"Unknown operation '{op}'. Must be one of: cut, join, intersect.")
     inp.operation = ops[op]
     rc.features.combineFeatures.add(inp)
     return {"body_count": rc.bRepBodies.count}
@@ -477,8 +503,17 @@ def delete_all(design):
     """Remove all solid bodies from the design."""
     rc = design.rootComponent
     remove = rc.features.removeFeatures
+    errors = []
     for i in range(rc.bRepBodies.count - 1, -1, -1):
-        remove.add(rc.bRepBodies.item(i))
+        try:
+            remove.add(rc.bRepBodies.item(i))
+        except Exception as exc:
+            errors.append(str(exc))
+    if errors:
+        return {
+            "success": False,
+            "error": {"code": "PARTIAL_DELETE", "message": "; ".join(errors)},
+        }
     return {"success": True}
 
 
@@ -500,9 +535,11 @@ def set_parameter(design, name, value):
 def get_model_parameters(design):
     """Return a list of model parameters (non-user-defined)."""
     user = design.userParameters
+    # Build a set of user-parameter names for O(1) lookup instead of O(N) per item
+    user_names = {user.item(i).name for i in range(user.count)}
     result = []
     for p in design.allParameters:
-        if all(user.item(i) != p for i in range(user.count)):
+        if p.name not in user_names:
             try:
                 val = str(p.value)
             except Exception:
@@ -518,10 +555,8 @@ def get_model_parameters(design):
 
 def export_as_step(design, name):
     """Export the design as a STEP file to Desktop/Fusion_Exports/<name>/."""
-    safe = re.sub(r"[^A-Za-z0-9_\-]", "_", name)
-    desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
-    out_dir = os.path.join(desktop, "Fusion_Exports", safe)
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = _exports_dir(name)
+    safe = os.path.basename(out_dir)
     path = os.path.join(out_dir, f"{safe}.step")
     opts = design.exportManager.createSTEPExportOptions(path)
     if not design.exportManager.execute(opts):
@@ -531,10 +566,7 @@ def export_as_step(design, name):
 
 def export_as_stl(design, name):
     """Export all bodies as STL files to Desktop/Fusion_Exports/<name>/."""
-    safe = re.sub(r"[^A-Za-z0-9_\-]", "_", name)
-    desktop = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")
-    out_dir = os.path.join(desktop, "Fusion_Exports", safe)
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = _exports_dir(name)
     mgr = design.exportManager
     rc = design.rootComponent
     for i in range(rc.bRepBodies.count):
@@ -556,7 +588,12 @@ def create_thread(design, ui, inside, sizes):
     tf = design.rootComponent.features.threadFeatures
     query = tf.threadDataQuery
     thread_type = query.allThreadTypes[0]
-    thread_size = query.allSizes(thread_type)[sizes]
+    all_sizes = query.allSizes(thread_type)
+    if not (0 <= sizes < len(all_sizes)):
+        raise ValueError(
+            f"size_index {sizes} is out of range; valid range is 0–{len(all_sizes) - 1}."
+        )
+    thread_size = all_sizes[sizes]
     designation = query.allDesignations(thread_type, thread_size)[0]
     cls = query.allClasses(False, thread_type, designation)[0]
     info = tf.createThreadInfo(inside, thread_type, designation, cls)

@@ -149,8 +149,11 @@ def palette_navigating(args: adsk.core.NavigationEventArgs):
     log_msg = f"User is attempting to navigate to {url}\n"
     futil.log(log_msg, adsk.core.LogLevels.InfoLogLevel)
 
-    # Check if url is an external site and open in user's default browser.
-    if url.startswith("http"):
+    # Open external (non-local) https links in the system browser; keep
+    # localhost/127.0.0.1 URLs inside the palette to avoid unintended browser launches.
+    if url.startswith("https://") and not url.startswith(
+        ("https://localhost", "https://127.0.0.1")
+    ):
         args.launchExternally = True
 
 

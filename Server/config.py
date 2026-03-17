@@ -37,7 +37,7 @@ ENDPOINTS = {
     "draw_one_line":       f"{BASE_URL}/draw_one_line",
     "circular_pattern":    f"{BASE_URL}/circular_pattern",
     "rectangular_pattern": f"{BASE_URL}/rectangular_pattern",
-    "ellipsie":            f"{BASE_URL}/ellipsis",
+    "ellipse":             f"{BASE_URL}/ellipsis",
     "draw2Dcircle":        f"{BASE_URL}/create_circle",
     "loft":                f"{BASE_URL}/loft",
     "draw_sphere":         f"{BASE_URL}/sphere",

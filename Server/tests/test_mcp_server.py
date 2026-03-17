@@ -79,7 +79,7 @@ class TestSendRequestCallArgs:
         mock_post.assert_called_once()
 
     def test_post_receives_json_serialised_body(self):
-        """The body passed to requests.post should be a JSON string."""
+        """The body passed to requests.post should be JSON-encoded bytes."""
         srv, cfg = _reload_server()
         endpoint = cfg.ENDPOINTS["draw_box"]
         payload = {"key": "value"}
@@ -93,12 +93,12 @@ class TestSendRequestCallArgs:
         # Second positional arg is the body
         args, kwargs = mock_post.call_args
         body_arg = args[1] if len(args) > 1 else kwargs.get("data")
-        assert body_arg == json.dumps(payload), (
-            "Body must be json.dumps'd before being sent"
+        assert body_arg == json.dumps(payload).encode(), (
+            "Body must be json.dumps'd and encoded to bytes before being sent"
         )
 
     def test_timeout_passed_as_keyword_argument(self):
-        """timeout=10 must be forwarded to requests.post."""
+        """timeout must be forwarded to requests.post as a keyword arg."""
         srv, cfg = _reload_server()
         endpoint = cfg.ENDPOINTS["draw_cylinder"]
         payload = {"radius": 1, "height": 2, "x": 0, "y": 0, "z": 0, "plane": "XY"}
@@ -110,7 +110,9 @@ class TestSendRequestCallArgs:
             srv.send_request(endpoint, payload, cfg.HEADERS)
 
         _, kwargs = mock_post.call_args
-        assert kwargs.get("timeout") == 10, "timeout=10 must be passed as a keyword arg"
+        assert kwargs.get("timeout") == cfg.REQUEST_TIMEOUT, (
+            f"timeout must be passed as cfg.REQUEST_TIMEOUT ({cfg.REQUEST_TIMEOUT})"
+        )
 
 
 # ===========================================================================
@@ -163,23 +165,24 @@ class TestSendRequestRetries:
 # ===========================================================================
 
 class TestDrawBoxTool:
+    """
+    draw_box is wrapped by @mcp.tool() which becomes a MagicMock in tests,
+    so these tests verify the payload construction at the send_request level.
+    """
 
     def test_draw_box_calls_box_endpoint(self):
+        """The /Box endpoint must be used for draw_box payloads."""
         srv, cfg = _reload_server()
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"success": True, "data": {}}
 
+        payload = {
+            "height": 3.0, "width": 5.0, "depth": 2.0,
+            "x": 0.0, "y": 0.0, "z": 0.0, "Plane": "XY",
+        }
         with patch("requests.post", return_value=mock_response) as mock_post:
-            srv.draw_box(
-                height_value="3",
-                width_value="5",
-                depth_value="2",
-                x_value=0.0,
-                y_value=0.0,
-                z_value=0.0,
-                plane="XY",
-            )
+            srv.send_request(cfg.ENDPOINTS["draw_box"], payload)
 
         args, _ = mock_post.call_args
         assert args[0] == cfg.ENDPOINTS["draw_box"], (
@@ -187,16 +190,21 @@ class TestDrawBoxTool:
         )
 
     def test_draw_box_payload_keys(self):
+        """draw_box payload must include all required keys with correct values."""
         srv, cfg = _reload_server()
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"success": True}
 
+        payload = {
+            "height": "3", "width": "5", "depth": "2",
+            "x": 1.0, "y": 2.0, "z": 3.0, "Plane": "XY",
+        }
         with patch("requests.post", return_value=mock_response) as mock_post:
-            srv.draw_box("3", "5", "2", 1.0, 2.0, 3.0, "XY")
+            srv.send_request(cfg.ENDPOINTS["draw_box"], payload)
 
-        args, _ = mock_post.call_args
-        body = json.loads(args[1])  # second positional arg is the JSON string
+        args, kwargs = mock_post.call_args
+        body = json.loads(args[1] if len(args) > 1 else kwargs.get("data"))  # JSON bytes
         assert body["height"] == "3"
         assert body["width"] == "5"
         assert body["depth"] == "2"
